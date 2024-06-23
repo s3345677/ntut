@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>pygame遊戲顯示</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: row;
+            align-items: flex-start;
+            justify-content: flex-start;
+            height: 100vh;
+            margin: 0;
+            overflow: auto; /* 允許垂直滾動 */
+        }
+
+        #leftPanel {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 20px;
+            min-width: 300px;
+        }
+
+	#rightPanel {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            justify-content: flex-start;
+            padding: 20px;
+            min-width: 300px;
+        }
+
+        #gameContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            flex-grow: 1;
+            padding: 20px;
+        }
+
+        canvas {
+            border: 1px solid black;
+            position: relative; /* 修改為相對定位 */
+            top: 0;
+        }
+
+        #gameInfo {
+            margin-top: 20px;
+            font-size: 20px;
+	    white-space: pre-line;
+        }
+
+        #dappInterface {
+            margin-top: 20px;
+            font-size: 20px;
+        }
+
+        #contractInfo {
+            margin-top: 20px;
+            font-size: 20px;
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/web3/dist/web3.min.js"></script>  <!-- 引入 Web3.js 庫 -->
+</head>
+<body>
+    <div id="leftPanel">
+        <h1>DAPP Token Interaction</h1>
+        <div id="contractAddress">智能合約帳號: Not connected</div>
+        <div id="contractInfo">合約資訊: Not connected</div>
+        <div id="accountInfo">連結帳戶: Not connected</div>
+        <div id="ethBalance">ETH 餘額: 0 ETH</div>
+        <div id="tokenBalance">Token 餘額: 0</div>
+
+        <div id="dappInterface">
+            <h2>SepoliaETH 兌換 BET</h2>
+            <input type="number" id="tokenAmount" placeholder="輸入購買BET數量">
+            <div id="ethEquivalent">預計花費: 0 SepoliaETH (未計算手續費)</div>
+            <button onclick="buyTokens()">兌換BET</button>
+
+            <h2>BET 兌換 SepoliaETH</h2>
+            <input type="number" id="ethAmount" placeholder="輸入花費BET數量">
+            <div id="ethEquivalentSell">預計獲得: 0 SepoliaETH (未計算手續費)</div>
+            <button onclick="sellTokens()">兌換ETH</button>
+
+        </div>
+    </div>
+
+    <div id="gameContainer">
+        <canvas id="gameCanvas" width="1000" height="700"></canvas>
+        <div id="gameInfo">遊戲時間: 0 <br>遊戲狀態: 遊戲未啟動</div>
+    </div>
+    
+    <div id="rightPanel">
+	<div id="dappInterface">
+	    <h2>遊戲投注</h2>
+	    <div id="teamSelection">
+	    	<button onclick="selectTeam('RedTeam WIN')">RedTeam WIN</button>
+    		<button onclick="selectTeam('BlueTeam WIN')">BlueTeam WIN</button>
+	    </div>
+	    <div id="selectedTeam">當前選擇的隊伍: None</div>
+	    <input type="hidden" id="betTeam">
+            <input type="number" id="betAmount" placeholder="輸入投注金額">
+            <button onclick="placeBet()">投注</button>
+	    <div id="betStatus">投注狀態: 未投注</div>
+	    
+	    <div id="betLog">
+		<h2>投注紀錄</h2>
+		<table>
+		    <thead>
+			<tr>
+			    <th>投注時間</th>
+			    <th>投注隊伍</th>
+			    <th>投注金額</th>
+			    <th>投注狀態</th>
+			    <th>投注結果</th>
+			</tr>
+		    </thead>
+		    <tbody id="betLogBody">
+			
+		    </tbody>
+		</table>
+	    </div>
+	</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameInfo = document.getElementById('gameInfo'); //從html獲取遊戲資訊
+        let ws = null;
+
+        // 智能合約地址和 ABI
+        const contractAddress = "0x5E73b9c695f1078786fA41FF7b04DdceA8c72de2";//在此處填入智能合約地址
+        const contractABI = [{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"inputs":[{"internalType":"address","name":"target","type":"address"}],"name":"AddressEmptyCode","type":"error"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"AddressInsufficientBalance","type":"error"},{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"allowance","type":"uint256"},{"internalType":"uint256","name":"needed","type":"uint256"}],"name":"ERC20InsufficientAllowance","type":"error"},{"inputs":[{"internalType":"address","name":"sender","type":"address"},{"internalType":"uint256","name":"balance","type":"uint256"},{"internalType":"uint256","name":"needed","type":"uint256"}],"name":"ERC20InsufficientBalance","type":"error"},{"inputs":[{"internalType":"address","name":"approver","type":"address"}],"name":"ERC20InvalidApprover","type":"error"},{"inputs":[{"internalType":"address","name":"receiver","type":"address"}],"name":"ERC20InvalidReceiver","type":"error"},{"inputs":[{"internalType":"address","name":"sender","type":"address"}],"name":"ERC20InvalidSender","type":"error"},{"inputs":[{"internalType":"address","name":"spender","type":"address"}],"name":"ERC20InvalidSpender","type":"error"},{"inputs":[],"name":"FailedInnerCall","type":"error"},{"inputs":[{"internalType":"address","name":"token","type":"address"}],"name":"SafeERC20FailedOperation","type":"error"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"owner","type":"address"},{"indexed":true,"internalType":"address","name":"spender","type":"address"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"}],"name":"Approval","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"string","name":"team","type":"string"},{"indexed":false,"internalType":"uint256","name":"amount","type":"uint256"}],"name":"BetPlaced","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"uint256","name":"reward","type":"uint256"}],"name":"BetSettled","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"uint256","name":"ethAmount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"tokenAmount","type":"uint256"}],"name":"EthExchangedForTokens","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"user","type":"address"},{"indexed":false,"internalType":"uint256","name":"tokenAmount","type":"uint256"},{"indexed":false,"internalType":"uint256","name":"ethAmount","type":"uint256"}],"name":"TokensExchangedForEth","type":"event"},{"anonymous":false,"inputs":[{"indexed":true,"internalType":"address","name":"from","type":"address"},{"indexed":true,"internalType":"address","name":"to","type":"address"},{"indexed":false,"internalType":"uint256","name":"value","type":"uint256"}],"name":"Transfer","type":"event"},{"inputs":[{"internalType":"address","name":"owner","type":"address"},{"internalType":"address","name":"spender","type":"address"}],"name":"allowance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"value","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"betstate","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"decimals","outputs":[{"internalType":"uint8","name":"","type":"uint8"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"betAmount","type":"uint256"}],"name":"exchangeBETForSepoliaEth","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"betAmount","type":"uint256"}],"name":"exchangeSepoliaEthForBET","outputs":[],"stateMutability":"payable","type":"function"},{"inputs":[],"name":"gamestate","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getRemainingEth","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"getRemainingTokens","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"name","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"string","name":"team","type":"string"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"placeBet","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"uint256","name":"","type":"uint256"}],"name":"playerAddresses","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"","type":"address"}],"name":"players","outputs":[{"internalType":"uint256","name":"betAmount","type":"uint256"},{"internalType":"string","name":"betTeam","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"reclaimTokens","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"string","name":"result","type":"string"}],"name":"settleBets","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"startNewgame","outputs":[],"stateMutability":"nonpayable","type":"function"},{"inputs":[],"name":"symbol","outputs":[{"internalType":"string","name":"","type":"string"}],"stateMutability":"view","type":"function"},{"inputs":[],"name":"totalSupply","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},{"inputs":[{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"value","type":"uint256"}],"name":"transfer","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},{"inputs":[{"internalType":"address","name":"from","type":"address"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"value","type":"uint256"}],"name":"transferFrom","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},{"stateMutability":"payable","type":"receive"}];//在此處填入智能合約 ABI
+
+        let web3;
+        let contract;
+        let account;
+
+        // 檢查 MetaMask 是否已安裝
+        if (typeof window.ethereum !== 'undefined') {
+            console.log('MetaMask is installed!');
+        }
+
+        // 初始化Web3實例並請求帳戶權限
+        async function initWeb3() {
+            if (typeof window.ethereum !== 'undefined') {
+                web3 = new Web3(window.ethereum);
+                try {
+                    await window.ethereum.request({ method: 'eth_requestAccounts' });
+                    console.log('連接到 MetaMask');
+                    contract = new web3.eth.Contract(contractABI, contractAddress);
+                    account = (await web3.eth.getAccounts())[0];
+                    document.getElementById('accountInfo').innerText = `連結帳戶: ${account}`;
+                    document.getElementById('contractAddress').innerText = `智能合約帳號: ${contractAddress}`;
+                    updateBalances();
+                    await loadContractInfo();  // 加載並顯示合約基本信息
+		    await approveContractForBetting(); // 调用批准方法
+                    window.ethereum.on('accountsChanged', handleAccountsChanged);
+                } catch (error) {
+                    console.error('User denied account access');
+                }
+            } else {
+                console.error('MetaMask is not installed!');
+            }
+        }
+
+        async function loadContractInfo() {	//實時更新加載合約基本資訊
+            try {
+                const name = await contract.methods.name().call();
+                const symbol = await contract.methods.symbol().call();
+                const decimals = await contract.methods.decimals().call();
+                const totalSupply = await contract.methods.totalSupply().call();
+                const remainingTokens = await contract.methods.balanceOf(contractAddress).call();
+                const remainingEth = await web3.eth.getBalance(contractAddress);
+
+                document.getElementById('contractInfo').innerHTML = `
+                        <p>代幣名稱: ${name}</p>
+                        <p>代幣符號: ${symbol}</p>
+                        <p>合約小數位數: ${decimals}</p>
+                        <p>總供應量: ${web3.utils.fromWei(totalSupply, 'ether')}</p>
+                        <p>合約剩餘代幣量: ${web3.utils.fromWei(remainingTokens, 'ether')} BET</p>
+                        <p>合約剩餘ETH: ${web3.utils.fromWei(remainingEth, 'ether')} ETH</p>
+                    `;
+            } catch (error) {
+                console.error('Error loading contract info: ', error);
+            }
+        }
+
+        async function handleAccountsChanged(accounts) {
+            if (accounts.length === 0) {
+                console.error('Please connect to MetaMask.');
+            } else {
+                account = accounts[0];
+                document.getElementById('accountInfo').innerText = `連結帳戶: ${account}`;
+                updateBalances();
+            }
+        }
+    
+	async function updateBalances() {
+            const ethBalance = await web3.eth.getBalance(account);
+            const tokenBalance = await contract.methods.balanceOf(account).call();
+            document.getElementById('ethBalance').innerText = `ETH 餘額: ${web3.utils.fromWei(ethBalance, 'ether')} ETH`;
+            document.getElementById('tokenBalance').innerText = `Token 餘額: ${web3.utils.fromWei(tokenBalance, 'ether')} BET`;
+        }
+	
+	document.getElementById('tokenAmount').addEventListener('input', function () { 	//實時更新預計花費SepoliaETH文本
+    	    const tokenAmount = this.value;
+    	    const ethAmount = tokenAmount * 0.001; // 每個BET的價格為0.001 SepoliaETH
+    		document.getElementById('ethEquivalent').innerText = `預計花費: ${ethAmount} SepoliaETH (未計算手續費)`;
+	});
+
+	document.getElementById('ethAmount').addEventListener('input', function () {	//實時更新預計獲得SepoliaETH文本
+    	    const tokenAmount = this.value;
+    	    const ethAmount = tokenAmount * 0.001; // 假設BET兌換ETH的比例是相同的
+    	    document.getElementById('ethEquivalentSell').innerText = `預計獲得: ${ethAmount} SepoliaETH (未計算手續費)`;
+	});
+
+	function selectTeam(team) {
+    	    document.getElementById('betTeam').value = team;
+	    document.getElementById('selectedTeam').innerText = `當前選擇的隊伍: ${team}`; // 更新選擇的隊伍
+    	    console.log(`選擇的隊伍: ${team}`);
+	}
+
+        async function buyTokens() {
+            const tokenAmount = document.getElementById('tokenAmount').value;
+            const ethAmount = tokenAmount * 0.001; // 每個BET的價格為0.001 SepoliaETH
+            try {
+                await contract.methods.exchangeSepoliaEthForBET(web3.utils.toWei(tokenAmount, 'ether')).send({ from: account, value: web3.utils.toWei(ethAmount.toString(), 'ether') });
+                console.log(`成功購買 ${tokenAmount} BET`);
+		updateBalances();
+            } catch (error) {
+                console.error(`購買失敗: ${error.message}`);
+            }
+        }
+
+        async function sellTokens() {
+            const tokenAmount = document.getElementById('ethAmount').value;
+            try {
+                await contract.methods.exchangeBETForSepoliaEth(web3.utils.toWei(tokenAmount, 'ether')).send({ from: account });
+                console.log(`成功賣出 ${tokenAmount} BET`);
+		updateBalances();
+            } catch (error) {
+                console.error(`賣出失敗: ${error.message}`);
+            }
+        }
+
+        async function placeBet() {
+            const betTeam = document.getElementById('betTeam').value;
+            const betAmount = document.getElementById('betAmount').value;
+            const currentTime = new Date().toLocaleString();
+	    if (!betTeam) {
+                console.error('請選擇投注隊伍');
+                return;
+            }
+		
+	    try {
+		await approveBetting(betAmount); // 调用批准方法
+		await contract.methods.placeBet(betTeam, web3.utils.toWei(betAmount, 'ether')).send({ from: account });
+		console.log(`投注成功: ${betTeam}, 金額: ${betAmount} BET`);
+		document.getElementById('betStatus').innerText = `投注狀態: 已投注 ${betTeam} ${betAmount} BET`;
+		logBet(currentTime, betTeam, betAmount, '成功', '等待結果');
+		updateBalances();
+	    }
+	    catch (error) {
+                console.error(`投注失敗: ${error.message}`);
+		document.getElementById('betStatus').innerText = '投注狀態: 失敗';	
+		logBet(currentTime, betTeam, betAmount, '失敗', '無');// 更新投注日誌
+            }
+        }
+	
+	function logBet(time, team, amount, status, result) {
+	    const betLogBody = document.getElementById('betLogBody');
+	    const newRow = document.createElement('tr');
+	    newRow.innerHTML = `
+		<td>${time}</td>
+		<td>${team}</td>
+		<td>${amount}</td>
+		<td>${status}</td>
+        	<td>${result}</td>
+	    `;
+	    betLogBody.appendChild(newRow);
+	}
+	
+	// 更新 gameInfo 的文本时，替换 \n 为 <br>
+    	function updateGameInfo(text) {
+            document.getElementById('gameInfo').innerHTML = text.replace(/\n/g, '<br>');
+    	}
+	function updateBetResults(gameResult) {
+	    const betLogBody = document.getElementById('betLogBody');
+    	    for (let row of betLogBody.rows) {
+		if (row.cells[3].innerText === '成功' && row.cells[4].innerText === '等待結果') {
+            	    row.cells[4].innerText = (row.cells[1].innerText === gameResult) ? '預測成功' : '預測失敗';
+        	}
+	    }
+	}
+	async function approveBetting(betAmount) {
+	    const allowance = await contract.methods.allowance(account, contractAddress).call();
+	    const requiredAllowance = web3.utils.toWei(betAmount, 'ether');
+	    if (parseInt(allowance, 10)< parseInt(requiredAllowance, 10)) {
+		await contract.methods.approve(contractAddress, requiredAllowance).send({ from: account });
+		console.log('已授權合約進行投注');
+	    }
+	}
+
+        function connectWebSocket() {
+            ws = new WebSocket('ws://localhost:8765');
+
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+                console.log('WebSocket連線已開啟');
+            };
+
+            ws.onmessage = async (event) => {
+                if (typeof event.data === 'string') {
+                    const message = event.data;
+                    if (message.startsWith('GameTime')) {
+                        const gameTime = message.split(':')[1].trim();
+                	const gameState = gameInfo.innerHTML.split('<br>').find(line => line.startsWith('遊戲狀態')).split(': ')[1];
+                	updateGameInfo(`遊戲時間: ${gameTime}<br>遊戲狀態: ${gameState}`);
+                    } 
+		    else if (message.startsWith('GameState')) {
+                        const gameState = message.split(':')[1].trim();
+                	const gameTime = gameInfo.innerHTML.split('<br>').find(line => line.startsWith('遊戲時間')).split(': ')[1];
+                	updateGameInfo(`遊戲時間: ${gameTime}<br>遊戲狀態: ${gameState}`);
+			if (message === 'GameState: 遊戲啟動中')
+			{
+			    const betstate = await contract.methods.betstate().call();
+			    
+			    if (betstate){
+				//呼叫智能合約出現投注事件，下一輪遊戲結束將觸發投注結算
+				await contract.methods.startNewgame().send({ from: account }); 
+			
+			    }
+			    else{
+				document.getElementById('betStatus').innerText = '投注狀態: 未投注'; // 更新網頁投注初始狀態
+			    }
+			}
+                    }
+		    else if (message.startsWith('GameResult')) {
+                        const gameResult = message.split(':')[1].trim();
+                        updateGameInfo(gameInfo.innerHTML + `<br>遊戲結果: ${gameResult}`);
+			try{
+			    const gamestate = await contract.methods.gamestate().call();
+			    if (gamestate){
+				document.getElementById('betStatus').innerText = '投注結算: 成功'; // 更新網頁投注結算狀態
+			    	updateBetResults(gameResult); // 更新網頁投注結果
+				await contract.methods.settleBets(gameResult).send({ from: account });  //呼叫智能合約處理投注結果
+				
+				updateBalances();
+			    }
+			}
+			catch (error) {
+			    console.error('Error settling bets: ', error);
+			    document.getElementById('betStatus').innerText = '投注結算: 失敗'; // 更新投注結算狀態
+			}     
+                    }
+                } 
+		else if (event.data instanceof ArrayBuffer) {
+                    const bytes = new Uint8Array(event.data);
+                    const blob = new Blob([bytes], { type: 'image/jpeg' });
+                    const url = URL.createObjectURL(blob);
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        URL.revokeObjectURL(url);
+                    };
+                    img.src = url;
+                }
+            };
+
+            ws.onclose = () => {
+                console.log('WebSocket連線已關閉');
+                setTimeout(connectWebSocket, 3000);  // 3秒后重新連接
+            };
+
+            ws.onerror = (error) => {
+                console.log('WebSocket出現錯誤:', error);
+            };
+        }
+
+        // 初始化
+        initWeb3();
+        connectWebSocket();
+    </script>
+</body>
+</html>
